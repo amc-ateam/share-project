@@ -1,0 +1,67 @@
+# 참고 : https://davi06000.tistory.com/27
+# jupyter 지원 + GPU 이미지 불러오기 
+$ docker pull tensorflow/tensorflow:latest-gpu-jupyter
+
+# docker image 를 이용해서 container 만들기 
+$ docker run [OPTIONS] IMAGE[:TAG|@DIGEST] [COMMAND]
+## docker run : create 와 start 가 합쳐진 명령어다. 이미지를 이용해서 컨테이너를 만들고 실행까지 같이 한다.
+## [OPTIONS] : run 뒤에 붙을 수 있는 옵션들을 이야기한다. 포트를 연결한다던지 커멘드 창을 연다 던 지 하는 것이다.
+## IMAGE[:TAG|@DIGEST] : 컨테이너를 만들 때 사용할 이미지와 태그를 입력하는 부분이다.
+## [COMMAND] : 컨테이너를 생성할 때 기본적으로 입력해주는 커멘드로 커멘드가 시작함과 동시에 실행된다.
+
+# ubuntu 기반 docker 설치
+# docker 이미지 검색
+
+docker search ubuntu
+
+# ubuntu image 받기
+docker pull ubuntu:latest
+
+# download 한 이미지 확인
+docker images
+
+# docker image tag 설정
+docker image tag ubuntu:latest study:1.0
+
+# 이미지를 컨테이너로 생성하고 실행하기
+docker create -i -t --name "study" ubuntu:latest /bin/bash -p 8888:8888
+docker start study
+docker attach study
+
+# [이전코드] ocker run -it--name "study" ubuntu:latest /bin/bash -p 8888:8888 
+
+# 컨테이너 종료
+exit
+
+# docker 에 jupyter 설치하기
+pip install jupyter 
+
+# jupyter 확인
+jupyter --version
+
+# python configuration 조정
+vi /root/.jupyter/jupyter_notebook_config.py
+
+# vi 에 아래와 같이 붙여넣기
+c = get_config()
+c.NotebookApp.ip = '*'
+c.NotebookApp.allow_root = True
+c.NotebookApp.open_browser = False
+
+# wq 저장
+
+# jupyter 실행
+jupyter notebook
+
+토큰 붙여넣기로 브라우저 열기
+
+
+
+
+$ docker run [OPTIONS] IMAGE[:TAG|@DIGEST] [COMMAND]
+$ docker run -d --gpus all -p 8888:8888 --name "tensorflow_gpu" tensorflow/tensorflow:latest-gpu-jupyter \
+jupyter notbook allow-root \
+  --ip 0.0.0.0 \
+  --NotebookApp.token='' \
+  --no-browser
+  
