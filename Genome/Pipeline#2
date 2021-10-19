@@ -1,0 +1,96 @@
+##references, hg38
+https://console.cloud.google.com/storage/browser/genomics-public-data/resources/broad/hg38/v0;tab=objects?prefix=&forceOnObjectsSortingFiltering=false
+
+#ref FASTQ
+https://storage.googleapis.com/genomics-public-data/resources/broad/hg38/v0/Homo_sapiens_assembly38.fasta
+https://storage.googleapis.com/genomics-public-data/resources/broad/hg38/v0/Homo_sapiens_assembly38.fasta.fai
+https://storage.googleapis.com/genomics-public-data/resources/broad/hg38/v0/Homo_sapiens_assembly38.dict
+
+#dbSNP
+https://storage.googleapis.com/genomics-public-data/resources/broad/hg38/v0/Homo_sapiens_assembly38.dbsnp138.vcf
+https://storage.googleapis.com/genomics-public-data/resources/broad/hg38/v0/Homo_sapiens_assembly38.dbsnp138.vcf.idx
+
+#indel
+https://storage.googleapis.com/genomics-public-data/resources/broad/hg38/v0/Mills_and_1000G_gold_standard.indels.hg38.vcf.gz
+https://storage.googleapis.com/genomics-public-data/resources/broad/hg38/v0/Mills_and_1000G_gold_standard.indels.hg38.vcf.gz.tbi
+
+#전체 Reference files download 
+https://drive.google.com/drive/folders/1CV_joCTkOJXQMotOnakyrBJm_cMoCOZA?usp=sharing
+
+# ref indexing 필요하면 
+./tools/bwa-0.7.17/bwa index -a bwtsw /ref/hg38/Homo_sapiens_assembly38.fasta
+
+## Mutect2 이용한 variant call pipeline
+
+#sickle install
+pip install sickle
+(설치 후 우분투에서 sickle 실행이 안되시면 sudo apt install sickle로 하세요)
+
+#sickle 이용해 trimming
+sickle pe -t sanger -f /data/QC18010001_1.fastq.gz -r /data/QC18010001_2.fastq.gz \
+       -o /data/QC18010001_1_trim.fastq -p /data/QC18010001_2_trim.fastq \
+       -s single.fasq
+
+#reference indexing ==> 시간이 긴 과정이니 .fai 파일을 다운로드해서 활용 가능
+./tools/bwa-0.7.17/bwa index -a bwtsw /ref/hg38/Homo_sapiens_assembly38.fasta
+
+#분석할 fastq 파일 indexing
+./tools/bwa-0.7.17/bwa aln /ref/hg38/Homo_sapiens_assembly38.fasta \
+       /data/QC18010001_1_trim.fastq > /data/QC18010001_1_trim.fastq.sai 
+
+./tools/bwa-0.7.17/bwa aln /ref/hg38/Homo_sapiens_assembly38.fasta \
+        /data/QC18010001_2_trim.fastq > /data/QC18010001_2_trim.fastq.sai
+
+#sam file 생성
+./tools/bwa-0.7.17/bwa sampe /ref/hg38/Homo_sapiens_assembly38.fasta \
+               /data/QC18010001_1_trim.fastq.sai /data/QC18010001_2_trim.fastq.sai\
+               /data/QC18010001_1_trim.fastq /data/QC18010001_2_trim.fastq > /data/QC18010001.sam
+
+#bam file 생성
+samtools view -bS -q 23 /data/QC18010001.sam > /data/QC18010001.bam
+
+#read group 추가
+java -Xmx16g -jar ./tools/picard.jar \
+        AddOrReplaceReadGroups\
+        -I /data/QC18010001.bam \
+        -O /data/QC18010001_rg.bam \
+        -RGLB "@RG\tID:foo\tSM:bar\tLB:library1\tPL:ILLUMINA" \
+        -RGPL ILLUMINA -RGPU rgpu -RGSM rgsm -SORT_ORDER coordinate \
+        --VALIDATION_STRINGENCY LENIENT
+(에러날 경우, 옵션을 -I 대신 I= 이렇게 바꿔보세요)\
+
+
+#duplicate 제거
+java -Xmx16g -jar ./tools/picard.jar \
+        MarkDuplicates  \
+        -I /data/QC18010001_rg.bam\
+        -O /data/QC18010001_rg_rd.bam\
+        -M /data/MarkDuplicatedMetrics.txt\
+        --VALIDATION_STRINGENCY LENIENT
+
+#base quality 계산
+./tools/gatk-4.2.0.0/gatk --java-options '-Xmx16g' BaseRecalibrator\
+               -R /ref/hg38/Homo_sapiens_assembly38.fasta \
+        -I /data/QC18010001_rg_rd.bam \
+       --known-sites /ref/hg38/Homo_sapiens_assembly38.dbsnp138.vcf \
+       --known-sites /ref/hg38/Mills_and_1000G_gold_standard.indels.hg38.vcf.gz \
+       -O /data/recal_data.table
+
+#base quality 보정
+./tools/gatk-4.2.0.0/gatk --java-options '-Xmx16g' ApplyBQSR \
+       -R /ref/hg38/Homo_sapiens_assembly38.fasta \
+       -I /data/QC18010001_rg_rd.bam \
+       --bqsr-recal-file /data/recal_data.table\
+       -O /data/QC18010001_rg_rd_rc.bam 
+       
+#mutect2 이용한 variant call (1)      
+./tools/gatk-4.2.0.0/gatk --java-options '-Xmx16g' Mutect2\
+        -R /ref/hg38/Homo_sapiens_assembly38.fasta \
+        -I /data/QC18010001_rg_rd_rc.bam \
+       -O /data/QC18010001_rg_rd_rc_unfiltered_Mutect.vcf
+
+#mutect2 이용한 variant call (2)
+./tools/gatk-4.2.0.0/gatk --java-options '-Xmx16g' FilterMutectCalls \
+        -R /ref/hg38/Homo_sapiens_assembly38.fasta\
+        -V /data/QC18010001_rg_rd_rc_unfiltered_Mutect.vcf \
+        -O /data/QC18010001_rg_rd_rc_filtered_Mutect.vcf
