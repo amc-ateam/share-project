@@ -1,0 +1,133 @@
+#############################
+##### 1) FASTQ file qc check ######
+# java 설치
+sudo apt-get update && sudo apt-get upgrade
+
+# Path추가 기본 명령
+vi ~/.bashrc
+export PATH ="$PATH:usr/프로그램경로/bin"
+source .bashrc
+
+# multiqc install
+# https://multiqc.info/
+conda create --name py3.7 python=3.7 
+conda activate py3.7
+conda install -c bioconda -c conda-forge multiqc
+
+multiqc ./  
+
+==> 결과는 html file 로 저장
+
+
+# perl 모듈 설치
+perl -MCPAN -e shell
+install String::Approx
+install PerlIO::gzip
+
+# host ==> docker 파일 이동
+docker cp \hostdir\file docker_name:dockerdir
+
+# < 0. FASTQ file QC >
+# FASTQC 설치 
+apt-get install FASTQC
+fastqc file.fastq.gz
+
+
+# <1. Trimming >
+# ngsShoRT download 설치
+wget https://research.bioinformatics.udel.edu/genomics/ngsShoRT/download/ngsShoRT_2.2.tar.gz
+# 압축풀기
+tar -zxvf ngsShoRT_2.2.tar.gz
+# trimming 
+perl ngsShoRT.pl -pe1 /data/QC18010001_1.fastq.gz -pe2 /data/QC18010001_2.fastq.gz -o /data/trimmed_fasq -methods lqr_5adpt_tera -t 1
+
+# <2. Alignment [[ FASTQ to SAM File ]] > 
+## 참고자료: https://informatics.fas.harvard.edu/short-introduction-to-bwa.html
+
+# BWA (Burrows-Wheeler Alignment) 설치
+wget https://sourceforge.net/projects/bio-bwa/files/bwa-0.7.17.tar.bz2
+# 압축풀고 make 
+
+
+
+##### 2) trimming ######
+## 참고자료: https://www.youtube.com/watch?v=gQ5x8wgIQu0
+
+# 사용할 tool : ngsShoRT
+
+# perl module 설치 필요
+sudo perl -MCPAN -e shell
+              install String::Approx
+              install PerlIO::gzip
+
+# 명령어 구조
+perl ngsShoRT.pl -pel <forward strand> -pe2 <reverse strand> -o <output directory> -methods <trimming method> -t <동시사용 CPU 수> 
+
+# 실제 명령어 [ngsShoRT directory로 이동]
+perl ngsShoRT.pl -pe1 /data/fasq_data/QC18010001_1.fastq.gz -pe2 /data/fasq_data/QC18010001_2.fastq.gz -o /data/trimmed_fasq -methods lqr_5adpt_tera -t 1
+
+##### 3) Alignment [[ FASTQ to SAM File ]]######
+## 참고자료: https://informatics.fas.harvard.edu/short-introduction-to-bwa.html
+
+# BWA (Burrows-Wheeler Alignment) 설치
+wget https://sourceforge.net/projects/bio-bwa/files/bwa-0.7.17.tar.bz2
+# 압축풀고 make 
+# human reference genome 다운로드 (GRCh37)
+
+# 3-1) reference data indexing  
+sudo ./bwa-0.7.17/bwa index /ref/GRCh37_latest_genomic.fna
+
+# 3-2) alignment 
+# 명령어 구조
+sudo ./bwa-0.7.17/bwa mem -M -R "@RG\tID:HWI\tSM:[샘플이름]\tPL:ILLUMIN\tLB[기계]" -t 10 [참조유전체 fasta] [FASTQ.gz 1][FASTQ.gz2]
+
+#실제 명령어
+sudo ./bwa-0.7.17/bwa mem -M -R "@RG\tID:QC18010001\tPL:ILLUMIN\tLBMyseq" -t 6 /ref/GRCh37_latest_genomic.fna /data/trimmed_fasq/trimmed_QC18010001_1.fastq /data/trimmed_fasq/trimmed_QC18010001_1.fastq > /data/QC18010001_pe.sam
+
+##### 4) Converting [[ SAM to BAM File ]]######
+## 참고자료: https://hhj6212.github.io/biology/tech/2020/10/18/samtools.html
+
+# Samtools 설치
+
+#명령어  <Conversion>
+sudo samtools view -b -o /data/QC18010001_pe.bam -S /data/QC18010001_pe.sam
+
+#명령어  <flagstat 파일 생성>
+sudo samtools flagstat /data/QC18010001_pe.bam > /data/QC18010001_pe.flagstat
+
+##### 5) Sort, Indexing, MarkDuplicates ######
+# picard 설치
+## sort, indexing 은 samtools 로도 가능함
+
+#명령어 <Sort>
+sudo java -jar picard.jar SortSam -INPUT=/data/QC18010001_pe.bam -OUTPUT=/data/QC18010001_pe_sorted.bam -SORT_ORDER coordinate
+
+#명령어 <Index>
+sudo java -jar picard.jar BuildBamIndex INPUT=/data/QC18010001_pe_sorted.bam
+
+#명령어 <Mark duplicates>
+sudo java -jar picard.jar MarkDuplicates I=/data/QC18010001_pe_sorted.bam O=/data/QC18010001_pe_sorted_dedup.bam M=metrics.txt
+
+##### 6) Variant calling ######
+# sudo apt install bcftools
+
+#명령어 
+bcftools mpileup -Ou -f /ref/GRCh37_latest_genomic.fna /data/QC18010001_pe_sorted_dedup.bam | bcftools call -vmO v -o /data/QC18010001_pe.vcf
+
+##### 7) Mutect 를 사용한 variant calling ######
+
+# reference dictionary 만들기
+sudo java -jar picard.jar CreateSequenceDictionary R=/ref/GRCh37_latest_genomic.fna O=/ref/GRCh37_latest_genomic.fa.dict
+
+# reference index 만들기
+sudo samtools faidx /ref/GRCh37_latest_genomic.fna
+
+cp GRCh37_latest_genomic.fna GRCh37_latest_genomic.fa
+
+# allele frequency file reference version converting
+gzip -d /af-only-gnomad.hg38.vcf.gz
+
+
+#mutect2 variant calling 명령어
+sudo ./tools/gatk-4.2.0.0/gatk Mutect2 -R /ref/GRCh37_latest_genomic.dict -I /data/QC18010001_pe_sorted_dedup.bam -O /data/QC18010001_pe_mutected_unfiltered.vcf.gz
+
