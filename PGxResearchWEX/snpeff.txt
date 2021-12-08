@@ -1,0 +1,1 @@
+java -Xmx8G -jar $snpEFF -stats BRONJ.variant_stats.html hg19 header/merge_BRONJ.vcf > annotated_merge_BRONJ.vcf
