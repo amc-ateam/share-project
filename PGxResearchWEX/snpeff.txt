@@ -1,1 +1,3 @@
 java -Xmx8G -jar $snpEFF -stats BRONJ.variant_stats.html hg19 header/merge_BRONJ.vcf > annotated_merge_BRONJ.vcf
+
+java -Xmx16G -jar $snpSIFT dbnsfp -db ./dbNSFP2.9.txt.gz snpeff_merge_BRONJ_PEP.vcf > snpeff_snpsift_merge_BRONJ_PEP.vcf
