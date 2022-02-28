@@ -1,0 +1,126 @@
+# WEX_variantcall_ionTorrent
+
+--------------------------------------------------------------
+/home/ngs_pipeline/tools = /tools
+/home/ngs_pipeline/data/ref = /ref
+/home/data/carbamazepine/fastq/CTRL_fastqs = /CTRL_fastqs
+/home/data/carbamazepine/vcf/CTRL_vcfs = /CTRL_vcfs
+--------------------------------------------------------------
+
+
+## Pipeline 1
+
+------------------------workspace -> /CTRL_fastqs
+### 0. FASTQ file QC check
+fastqc *.fastq.gz &
+
+### 1. Trimming
+perl /tools/ngsShoRT_2.2/ngsShoRT.pl \
+        -se /CTRL_fastqs/TS276.fastq.gz \
+        -o /CTRL_vcfs/p1/trimmed_fastq \
+        -methods lqr_5adpt_tera -t 1
+
+------------------------workspace -> /CTRL_vcfs/p1/trimmed_fastq
+
+### 2. Alignment [ FASTQ to SAM File ]
+2-1) reference indexing
+/tools/bwa-0.7.17/bwa index GRCh38_latest_genomic.fna
+
+2-2) fastq alignment
+/tools/bwa-0.7.17/bwa mem -M -R "@RG\tID:foo\tSM:bar\tLB:library1\tPL:ILLUMINA" -t 6 /ref/GRCh38/GRCh38_latest_genomic.fna  ./trimmed_TS276.fastq ./trimmed_TS276.fastq > ./TS276.sam
+
+### 3. Converting [ SAM to BAM File ]
+3-1) Conversion
+samtools view -b -o ./TS276.bam -S ./TS276.sam
+
+3-2) flagstat 파일 생성
+samtools flagstat ./TS276.bam > ./TS276.flagstat
+
+### 4. Sort
+samtools sort ./TS276.bam -o ./TS276_sorted.bam 
+
+### 5. Indexing
+samtools index ./TS276_sorted.bam 
+
+### 6. MarkDuplicates
+java -jar /tools/picard.jar MarkDuplicates \
+        I=./TS276_sorted.bam \
+        O=./TS276_sorted_dedup.bam \
+        M=metrics.txt
+
+### 7. Variant Calling
+bcftools mpileup -Ou -f /ref/GRCh38/GRCh38_latest_genomic.fna ./TS276_sorted_dedup.bam | bcftools call -vmO v -o ./TS276.vcf.gz
+
+### 8. HaplotypeCaller Variant Calling 
+8-1) reference dictionary 생성
+java -jar /tools/picard.jar CreateSequenceDictionary R=/ref/GRCh38/GRCh38_latest_genomic.fna O=/ref/GRCh38/GRCh38_latest_genomic.dict
+
+8-2) reference index 
+samtools faidx /ref/GRCh38/GRCh38_latest_genomic.fna
+cp /ref/GRCh38/GRCh38_latest_genomic.fna /ref/GRCh38/GRCh38_latest_genomic.fa
+
+8-3) indexing
+samtools index ./TS276_sorted_dedup.bam
+
+8-4) variant calling
+/tools/gatk-4.2.0.0/gatk --java-options '-Xmx16g' HaplotypeCaller \ 
+        -R /ref/GRCh38/GRCh38_latest_genomic.fna \
+        -I ./TS276_sorted_dedup.bam \
+        -O ./TS276_HaplotypeCaller.vcf.gz
+        
+
+
+## Pipeline 2
+
+------------------------workspace -> /CTRL_vcfs/p2
+### 1. Trimming
+sickle se -t sanger -f /CTRL_fastqs/TS276.fastq.gz -o TS276_trimmed.fastq
+
+### 2. Indexing
+2-1) reference data indexing
+/tools/bwa-0.7.17/bwa index -a bwtsw /ref/hg38/Homo_sapiens_assembly38.fasta
+
+2-2) fastq file Indexing 
+/tools/bwa-0.7.17/bwa aln /ref/hg38/Homo_sapiens_assembly38.fasta TS276_trimmed.fastq > TS276_trimmed.fastq.sai
+
+### 3. Sam file 생성
+/tools/bwa-0.7.17/bwa samse /ref/hg38/Homo_sapiens_assembly38.fasta TS276_trimmed.fastq.sai TS276_trimmed.fastq > TS276_trimmed.sam
+
+### 4. Bam file 생성
+samtools view -bS -q 23 TS276_trimmed.sam > TS276_trimmed.bam
+
+### 5. Read Group 추가
+java -Xmx16g -jar /tools/picard.jar AddOrReplaceReadGroups \
+         -I TS276_trimmed.bam \
+         -O TS276_trimmed_rg.bam \
+         -RGLB "@RG\tID:foo\tSM:bar\tLB:library1\tPL:ILLUMINA" \
+         -RGPL ILLUMINA -RGPU rgpu -RGSM rgsm -SORT_ORDER coordinate \
+         --VALIDATION_STRINGENCY LENIENT
+
+### 6. Duplicate 제거
+java -Xmx16g -jar /tools/picard.jar MarkDuplicates  \
+        -I TS276_trimmed_rg.bam \
+        -O TS276_trimmed_rg_rd.bam \
+        -M MarkDuplicatedMetrics.txt \
+        --VALIDATION_STRINGENCY LENIENT
+
+### 7. Base Quality 계산
+/tools/gatk-4.2.0.0/gatk --java-options '-Xmx16g' BaseRecalibrator \
+        -R /ref/hg38/Homo_sapiens_assembly38.fasta \
+        -I TS276_trimmed_rg_rd.bam \
+       --known-sites /ref/hg38/Homo_sapiens_assembly38.dbsnp138.vcf \
+       --known-sites /ref/hg38/Mills_and_1000G_gold_standard.indels.hg38.vcf.gz \
+       -O recal_data.table
+
+### 8. Base Quality 보정
+/tools/gatk-4.2.0.0/gatk --java-options '-Xmx16g' ApplyBQSR \
+        -R /ref/hg38/Homo_sapiens_assembly38.fasta \
+        -I TS276_trimmed_rg_rd.bam \
+        --bqsr-recal-file recal_data.table \
+        -O TS276_trimmed_rg_rd_rc.bam
+
+### 9. HaplotypeCaller 이용한 Variant Call
+/tools/gatk-4.2.0.0/gatk --java-options '-Xmx16g' HaplotypeCaller \
+        -R /ref/hg38/Homo_sapiens_assembly38.fasta \
+        -I TS276_trimmed_rg_rd_rc.bam \
+        -O TS276_trimmed_rg_rd_rc_HaplotypeCaller.vcf
