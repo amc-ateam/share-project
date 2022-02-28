@@ -7,10 +7,10 @@
 /home/data/carbamazepine/vcf/CTRL_vcfs = /CTRL_vcfs
 --------------------------------------------------------------
 
-
 ## Pipeline 1
 
-------------------------workspace -> /CTRL_fastqs
+------------------------workspace -> /CTRL_fastqs------------------------
+
 ### 0. FASTQ file QC check
 fastqc *.fastq.gz &
 
@@ -20,7 +20,7 @@ perl /tools/ngsShoRT_2.2/ngsShoRT.pl \
         -o /CTRL_vcfs/p1/trimmed_fastq \
         -methods lqr_5adpt_tera -t 1
 
-------------------------workspace -> /CTRL_vcfs/p1/trimmed_fastq
+------------------------workspace -> /CTRL_vcfs/p1/trimmed_fastq------------------------
 
 ### 2. Alignment [ FASTQ to SAM File ]
 2-1) reference indexing
@@ -72,7 +72,8 @@ samtools index ./TS276_sorted_dedup.bam
 
 ## Pipeline 2
 
-------------------------workspace -> /CTRL_vcfs/p2
+------------------------workspace -> /CTRL_vcfs/p2------------------------
+
 ### 1. Trimming
 sickle se -t sanger -f /CTRL_fastqs/TS276.fastq.gz -o TS276_trimmed.fastq
 
@@ -124,3 +125,7 @@ java -Xmx16g -jar /tools/picard.jar MarkDuplicates  \
         -R /ref/hg38/Homo_sapiens_assembly38.fasta \
         -I TS276_trimmed_rg_rd_rc.bam \
         -O TS276_trimmed_rg_rd_rc_HaplotypeCaller.vcf
+        
+        
+        
+        
